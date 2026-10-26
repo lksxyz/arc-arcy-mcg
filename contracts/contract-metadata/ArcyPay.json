@@ -1,0 +1,196 @@
+{
+  "contractAddress": "0x0b7288b4a05ee06a4489ebf98522ca988b5fbece",
+  "network": "ARC-TESTNET",
+  "deployerWalletId": "3c2464b2-8369-52e2-a782-800bbeca5396",
+  "contract_code_path": "/home/user/app/contracts/ArcyPay.sol",
+  "contract_compiled_code_path": "/home/user/app/contracts/out/ArcyPay.sol/ArcyPay.json",
+  "contract_network_and_links": {
+    "Arc Testnet": "https://explorer.testnet.arc.io/address/0x0b7288b4a05ee06a4489ebf98522ca988b5fbece"
+  },
+  "contract_deployments": [
+    {
+      "chain": "Arc Testnet",
+      "address": "0x0b7288b4a05ee06a4489ebf98522ca988b5fbece",
+      "explorerUrl": "https://explorer.testnet.arc.io/address/0x0b7288b4a05ee06a4489ebf98522ca988b5fbece",
+      "txHash": "0xccd45c5145a9a7f50a0cf85a8b1b8a0e5682df0d619065eb0ae361d4e12a1535",
+      "deployedAt": "2026-10-26T20:59:37.905Z"
+    },
+    {
+      "chain": "Arc Testnet",
+      "address": "0x90e0e3b1afc941679a473de10f6d5fc68d271f6e",
+      "explorerUrl": "https://explorer.testnet.arc.io/address/0x90e0e3b1afc941679a473de10f6d5fc68d271f6e",
+      "txHash": "0xa465032c35e115e6691b665dbb3d3ba25ae1df316c10e469394685aff2de0239",
+      "deployedAt": "2026-10-25T12:38:17.140Z"
+    }
+  ],
+  "abi": [
+    {
+      "type": "constructor",
+      "inputs": [
+        {
+          "name": "registry_",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "announcer_",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "announcer",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "",
+          "type": "address",
+          "internalType": "contract IArcyAnnouncer"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "payByUsername",
+      "inputs": [
+        {
+          "name": "recipientUsername",
+          "type": "string",
+          "internalType": "string"
+        },
+        {
+          "name": "stealthAddress",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "amount",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "ephemeralPubKey",
+          "type": "bytes",
+          "internalType": "bytes"
+        },
+        {
+          "name": "viewTag",
+          "type": "bytes1",
+          "internalType": "bytes1"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "payByUsernameWithPermit",
+      "inputs": [
+        {
+          "name": "recipientUsername",
+          "type": "string",
+          "internalType": "string"
+        },
+        {
+          "name": "stealthAddress",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "amount",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "ephemeralPubKey",
+          "type": "bytes",
+          "internalType": "bytes"
+        },
+        {
+          "name": "viewTag",
+          "type": "bytes1",
+          "internalType": "bytes1"
+        },
+        {
+          "name": "deadline",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "v",
+          "type": "uint8",
+          "internalType": "uint8"
+        },
+        {
+          "name": "r",
+          "type": "bytes32",
+          "internalType": "bytes32"
+        },
+        {
+          "name": "s",
+          "type": "bytes32",
+          "internalType": "bytes32"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "registry",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "",
+          "type": "address",
+          "internalType": "contract IArcyRegistry"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "event",
+      "name": "PaymentSent",
+      "inputs": [
+        {
+          "name": "sender",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "stealthAddress",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "amount",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "error",
+      "name": "TransferFailed",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "ZeroAddress",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "ZeroAmount",
+      "inputs": []
+    }
+  ]
+}
