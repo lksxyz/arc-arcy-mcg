@@ -40,6 +40,8 @@ export const ACTIVE_CHAIN_ID = IS_MAINNET ? ARC_MAINNET_CHAIN_ID : ARC_TESTNET_C
 
 export const IS_MAINNET_BUILD = IS_MAINNET
 
+export const ACTIVE_CHAIN_NAME = IS_MAINNET ? 'Arc Mainnet' : 'Arc Testnet'
+
 const ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/
 
 export const MISSING_MAINNET_ADDRESSES: string[] = IS_MAINNET

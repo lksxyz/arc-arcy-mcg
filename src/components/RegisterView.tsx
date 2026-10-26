@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
-import { useAccount, useWriteContract, useWaitForTransactionReceipt, useReadContract, useSwitchChain, useSignMessage } from 'wagmi'
+import { useAccount, useWriteContract, useWaitForTransactionReceipt, useReadContract, useSignMessage } from 'wagmi'
 import { ConnectKitButton } from 'connectkit'
 import { Loader2, User, Shield, ExternalLink, CheckCircle2, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
-import { ARCY_REGISTRY, ACTIVE_CHAIN_ID } from '@/contracts'
+import { ARCY_REGISTRY, ACTIVE_CHAIN_ID, ACTIVE_CHAIN_NAME } from '@/contracts'
+import { useEnsureActiveChain } from '@/chain-switch'
 import { deriveStealthKeysFromSignature, stealthKeyDerivationMessage, CURRENT_META_VERSION } from '@/stealth'
 import { buildTxExplorerUrl } from '@/onchain-facts'
 
@@ -16,7 +17,7 @@ const glass = {
 
 export default function RegisterView() {
   const { address, chainId, isConnected } = useAccount()
-  const { switchChain } = useSwitchChain()
+  const ensureChain = useEnsureActiveChain()
   const { writeContract, data: hash, isPending, error: writeError } = useWriteContract()
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash })
   const { signMessageAsync, isPending: isSigning } = useSignMessage()
@@ -52,7 +53,13 @@ export default function RegisterView() {
 
   const handleRegister = async () => {
     if (!canRegister) return
-    if (wrongChain) { switchChain({ chainId: ACTIVE_CHAIN_ID }); return }
+    if (wrongChain) {
+      const switched = await ensureChain()
+      if (!switched) {
+        toast.error(`Could not switch to ${ACTIVE_CHAIN_NAME}. Add the network in your wallet and try again.`)
+        return
+      }
+    }
 
     try {
       const sig = await signMessageAsync({
@@ -172,7 +179,7 @@ export default function RegisterView() {
         className="w-full rounded-2xl py-3.5 text-sm font-semibold text-white transition-all hover:scale-[1.01] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40 flex items-center justify-center gap-2"
         style={{ background: 'var(--accent)' }}
       >
-        {wrongChain ? 'Switch to Arc Testnet'
+        {wrongChain ? `Switch to ${ACTIVE_CHAIN_NAME}`
           : isSigning ? <><Loader2 className="size-4 animate-spin" />Sign in wallet...</>
           : isPending ? <><Loader2 className="size-4 animate-spin" />Confirm transaction...</>
           : isConfirming ? <><Loader2 className="size-4 animate-spin" />Registering...</>

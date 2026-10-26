@@ -1,10 +1,11 @@
-import { useAccount, useWriteContract, useWaitForTransactionReceipt, useReadContract, useSwitchChain, useSignMessage } from 'wagmi'
+import { useAccount, useWriteContract, useWaitForTransactionReceipt, useReadContract, useSignMessage } from 'wagmi'
 import { ConnectKitButton } from 'connectkit'
 import { Loader2, User, ExternalLink, Trash2, CheckCircle2, Copy, ArrowRightLeft, RefreshCw, UserCheck } from 'lucide-react'
 import { toast } from 'sonner'
 import { useState, useEffect, useMemo } from 'react'
 import { isAddress } from 'viem'
-import { ARCY_REGISTRY, ACTIVE_CHAIN_ID } from '@/contracts'
+import { ARCY_REGISTRY, ACTIVE_CHAIN_ID, ACTIVE_CHAIN_NAME } from '@/contracts'
+import { useEnsureActiveChain } from '@/chain-switch'
 import { buildTxExplorerUrl } from '@/onchain-facts'
 import {
   deriveStealthKeysFromSignature,
@@ -23,7 +24,7 @@ const glass = {
 
 export default function AccountView() {
   const { address, chainId, isConnected } = useAccount()
-  const { switchChain } = useSwitchChain()
+  const ensureChain = useEnsureActiveChain()
   const { signMessageAsync } = useSignMessage()
   const [copied, setCopied] = useState(false)
   const [transferTo, setTransferTo] = useState('')
@@ -120,13 +121,25 @@ export default function AccountView() {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const handleRelease = () => {
-    if (wrongChain) { switchChain({ chainId: ACTIVE_CHAIN_ID }); return }
+  const handleRelease = async () => {
+    if (wrongChain) {
+      const switched = await ensureChain()
+      if (!switched) {
+        toast.error(`Could not switch to ${ACTIVE_CHAIN_NAME}. Add the network in your wallet and try again.`)
+        return
+      }
+    }
     release({ ...ARCY_REGISTRY, functionName: 'releaseUsername' })
   }
 
   const handleRotate = async () => {
-    if (wrongChain) { switchChain({ chainId: ACTIVE_CHAIN_ID }); return }
+    if (wrongChain) {
+      const switched = await ensureChain()
+      if (!switched) {
+        toast.error(`Could not switch to ${ACTIVE_CHAIN_NAME}. Add the network in your wallet and try again.`)
+        return
+      }
+    }
     try {
       const sig = await signMessageAsync({
         message: stealthKeyDerivationMessage(CURRENT_META_VERSION, ACTIVE_CHAIN_ID),
@@ -142,19 +155,37 @@ export default function AccountView() {
     }
   }
 
-  const handleTransfer = () => {
-    if (wrongChain) { switchChain({ chainId: ACTIVE_CHAIN_ID }); return }
+  const handleTransfer = async () => {
+    if (wrongChain) {
+      const switched = await ensureChain()
+      if (!switched) {
+        toast.error(`Could not switch to ${ACTIVE_CHAIN_NAME}. Add the network in your wallet and try again.`)
+        return
+      }
+    }
     if (!isAddress(transferTo)) { toast.error('Enter a valid wallet address.'); return }
     startTransfer({ ...ARCY_REGISTRY, functionName: 'transferUsername', args: [transferTo] })
   }
 
-  const handleCancelTransfer = () => {
-    if (wrongChain) { switchChain({ chainId: ACTIVE_CHAIN_ID }); return }
+  const handleCancelTransfer = async () => {
+    if (wrongChain) {
+      const switched = await ensureChain()
+      if (!switched) {
+        toast.error(`Could not switch to ${ACTIVE_CHAIN_NAME}. Add the network in your wallet and try again.`)
+        return
+      }
+    }
     cancelTransfer({ ...ARCY_REGISTRY, functionName: 'cancelUsernameTransfer' })
   }
 
-  const handleAccept = () => {
-    if (wrongChain) { switchChain({ chainId: ACTIVE_CHAIN_ID }); return }
+  const handleAccept = async () => {
+    if (wrongChain) {
+      const switched = await ensureChain()
+      if (!switched) {
+        toast.error(`Could not switch to ${ACTIVE_CHAIN_NAME}. Add the network in your wallet and try again.`)
+        return
+      }
+    }
     if (!/^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/.test(acceptName)) {
       toast.error('Enter a valid username.')
       return
@@ -246,7 +277,7 @@ export default function AccountView() {
                 </p>
                 <button
                   disabled={isCancelling || isCancelConfirming}
-                  onClick={handleCancelTransfer}
+                  onClick={() => void handleCancelTransfer()}
                   className="w-full rounded-xl py-2 text-xs font-semibold disabled:opacity-40 flex items-center justify-center gap-2"
                   style={{ background: 'rgba(186,43,76,0.08)', color: 'var(--danger)' }}
                 >
@@ -266,7 +297,7 @@ export default function AccountView() {
                 />
                 <button
                   disabled={isTransferring || isTransferConfirming || transferTo.length === 0}
-                  onClick={handleTransfer}
+                  onClick={() => void handleTransfer()}
                   className="w-full rounded-xl py-2 text-xs font-semibold disabled:opacity-40 flex items-center justify-center gap-2"
                   style={{ background: 'rgba(18,45,69,0.08)', color: 'var(--ink)' }}
                 >
@@ -281,11 +312,11 @@ export default function AccountView() {
           {!isReleased && (
             <button
               disabled={isReleasing || isReleaseConfirming}
-              onClick={handleRelease}
+              onClick={() => void handleRelease()}
               className="w-full rounded-2xl py-3 text-sm font-semibold transition-all hover:scale-[1.01] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40 flex items-center justify-center gap-2"
               style={{ background: 'rgba(186,43,76,0.08)', color: 'var(--danger)', border: '1px solid rgba(186,43,76,0.16)' }}
             >
-              {wrongChain ? 'Switch to Arc Testnet'
+              {wrongChain ? `Switch to ${ACTIVE_CHAIN_NAME}`
                 : isReleasing ? <><Loader2 className="size-4 animate-spin" />Confirm in wallet...</>
                 : isReleaseConfirming ? <><Loader2 className="size-4 animate-spin" />Releasing...</>
                 : <><Trash2 className="size-4" />Release username</>}
@@ -326,7 +357,7 @@ export default function AccountView() {
             />
             <button
               disabled={isAccepting || isAcceptConfirming || acceptName.length === 0}
-              onClick={handleAccept}
+              onClick={() => void handleAccept()}
               className="w-full rounded-xl py-2 text-xs font-semibold disabled:opacity-40 flex items-center justify-center gap-2"
               style={{ background: 'rgba(18,45,69,0.08)', color: 'var(--ink)' }}
             >

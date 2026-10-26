@@ -140,8 +140,9 @@ to `index.html`. Set the `VITE_*` variables in the hosting environment, not in t
 
 ## Wallet network setup
 
-If a wallet does not know Arc yet, switching networks fails with an "unrecognized chain" error. Add it
-manually:
+The app first tries `wallet_switchEthereumChain`. If the wallet does not know Arc, it falls back to
+`wallet_addEthereumChain` with the parameters below and retries the switch. If the wallet rejects the
+request, add the network manually:
 
 | Field | Arc Mainnet | Arc Testnet |
 |---|---|---|

@@ -1,13 +1,14 @@
 import { useState } from 'react'
 import {
   useAccount, useWriteContract, useWaitForTransactionReceipt,
-  useReadContract, useSwitchChain, useSignTypedData, usePublicClient,
+  useReadContract, useSignTypedData, usePublicClient,
 } from 'wagmi'
 import { ConnectKitButton } from 'connectkit'
 import { Loader2, Search, Send, ExternalLink, CheckCircle2, AlertCircle } from 'lucide-react'
 import { bytesToHex, hexToBigInt, numberToHex, slice, type Hex } from 'viem'
 import { toast } from 'sonner'
-import { ARCY_REGISTRY, ARCY_PAY, ACTIVE_CHAIN_ID, USDC_ADDRESS, USDC_PERMIT_NAME, USDC_PERMIT_VERSION } from '@/contracts'
+import { ARCY_REGISTRY, ARCY_PAY, ACTIVE_CHAIN_ID, ACTIVE_CHAIN_NAME, USDC_ADDRESS, USDC_PERMIT_NAME, USDC_PERMIT_VERSION } from '@/contracts'
+import { useEnsureActiveChain } from '@/chain-switch'
 import { generateStealthAddress } from '@/stealth'
 import { parseAmount } from '@/onchain-money'
 import { buildTxExplorerUrl } from '@/onchain-facts'
@@ -51,7 +52,7 @@ function splitPermitSignature(signature: Hex): { v: number; r: Hex; s: Hex } {
 
 export default function PayView({ defaultUsername = '' }: PayViewProps) {
   const { address, chainId, isConnected } = useAccount()
-  const { switchChain } = useSwitchChain()
+  const ensureChain = useEnsureActiveChain()
   const publicClient = usePublicClient({ chainId: ACTIVE_CHAIN_ID })
 
   const [recipientUsername, setRecipientUsername] = useState(defaultUsername)
@@ -85,9 +86,15 @@ export default function PayView({ defaultUsername = '' }: PayViewProps) {
 
   const isBusy = status !== 'idle' || isPayConfirming
 
-  const preparePayment = () => {
+  const preparePayment = async () => {
     if (!parsedAmount || !recipientMetaAddr || !address) return
-    if (wrongChain) { switchChain({ chainId: ACTIVE_CHAIN_ID }); return }
+    if (wrongChain) {
+      const switched = await ensureChain()
+      if (!switched) {
+        toast.error(`Could not switch to ${ACTIVE_CHAIN_NAME}. Add the network in your wallet and try again.`)
+        return
+      }
+    }
 
     try {
       const { stealthAddress, ephemeralPubKey, viewTag } = generateStealthAddress(
@@ -109,7 +116,13 @@ export default function PayView({ defaultUsername = '' }: PayViewProps) {
 
   const handlePay = async () => {
     if (!preview || !address || !publicClient) return
-    if (wrongChain) { switchChain({ chainId: ACTIVE_CHAIN_ID }); return }
+    if (wrongChain) {
+      const switched = await ensureChain()
+      if (!switched) {
+        toast.error(`Could not switch to ${ACTIVE_CHAIN_NAME}. Add the network in your wallet and try again.`)
+        return
+      }
+    }
 
     try {
       setStatus('signing')
@@ -225,7 +238,7 @@ export default function PayView({ defaultUsername = '' }: PayViewProps) {
   }
 
   const buttonLabel = () => {
-    if (wrongChain) return 'Switch to Arc Testnet'
+    if (wrongChain) return `Switch to ${ACTIVE_CHAIN_NAME}`
     if (status === 'signing') return <span className="flex items-center justify-center gap-2"><Loader2 className="size-4 animate-spin" />Sign permit in wallet...</span>
     if (status === 'sending') return <span className="flex items-center justify-center gap-2"><Loader2 className="size-4 animate-spin" />Confirm payment in wallet...</span>
     if (isPayConfirming) return <span className="flex items-center justify-center gap-2"><Loader2 className="size-4 animate-spin" />Sending...</span>
@@ -343,7 +356,7 @@ export default function PayView({ defaultUsername = '' }: PayViewProps) {
       {!preview && (
         <button
           disabled={isBusy || !readyToPay}
-          onClick={preparePayment}
+          onClick={() => void preparePayment()}
           className="w-full rounded-2xl py-3.5 text-sm font-semibold text-white transition-all hover:scale-[1.01] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40"
           style={{ background: 'var(--accent)' }}
         >
