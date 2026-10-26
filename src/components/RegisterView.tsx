@@ -4,7 +4,7 @@ import { ConnectKitButton } from 'connectkit'
 import { Loader2, User, Shield, ExternalLink, CheckCircle2, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { ARCY_REGISTRY, ACTIVE_CHAIN_ID } from '@/contracts'
-import { deriveStealthKeysFromSignature, STEALTH_KEY_DERIVATION_MESSAGE } from '@/stealth'
+import { deriveStealthKeysFromSignature, stealthKeyDerivationMessage, CURRENT_META_VERSION } from '@/stealth'
 import { buildTxExplorerUrl } from '@/onchain-facts'
 
 const glass = {
@@ -27,13 +27,11 @@ export default function RegisterView() {
 
   const wrongChain = isConnected && chainId !== ACTIVE_CHAIN_ID
 
-  // Debounce username 500ms
   useEffect(() => {
     const t = setTimeout(() => setDebouncedUsername(username), 500)
     return () => clearTimeout(t)
   }, [username])
 
-  // Existing username for this wallet
   const { data: existingUsername } = useReadContract({
     ...ARCY_REGISTRY,
     functionName: 'getUsername',
@@ -41,14 +39,13 @@ export default function RegisterView() {
     query: { enabled: !!address },
   })
 
-  const usernameValid = /^[a-z0-9-]{1,32}$/.test(username)
+  const usernameValid = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/.test(username)
 
-  // Availability check (debounced)
   const { data: isAvailable, isLoading: isCheckingAvailability } = useReadContract({
     ...ARCY_REGISTRY,
     functionName: 'isUsernameAvailable',
     args: [debouncedUsername],
-    query: { enabled: /^[a-z0-9-]{1,32}$/.test(debouncedUsername) },
+    query: { enabled: /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/.test(debouncedUsername) },
   })
 
   const canRegister = usernameValid && isAvailable === true && debouncedUsername === username
@@ -58,12 +55,15 @@ export default function RegisterView() {
     if (wrongChain) { switchChain({ chainId: ACTIVE_CHAIN_ID }); return }
 
     try {
-      // 1. Sign the deterministic message to derive stealth keys
-      const sig = await signMessageAsync({ message: STEALTH_KEY_DERIVATION_MESSAGE })
-      const { stealthMetaAddress: meta } = deriveStealthKeysFromSignature(sig)
+      const sig = await signMessageAsync({
+        message: stealthKeyDerivationMessage(CURRENT_META_VERSION, ACTIVE_CHAIN_ID),
+      })
+      const { stealthMetaAddress: meta } = deriveStealthKeysFromSignature(sig, {
+        version: CURRENT_META_VERSION,
+        chainId: ACTIVE_CHAIN_ID,
+      })
       setStealthMetaAddress(meta)
 
-      // 2. Register onchain
       writeContract({
         ...ARCY_REGISTRY,
         functionName: 'registerUsername',
@@ -117,7 +117,6 @@ export default function RegisterView() {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Username input */}
       <div className="flex flex-col gap-1.5">
         <label className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--muted)', letterSpacing: '0.08em' }}>
           Choose username
@@ -143,7 +142,7 @@ export default function RegisterView() {
           )}
         </div>
         {username.length > 0 && !usernameValid && (
-          <p className="text-xs" style={{ color: 'var(--danger)' }}>1–32 chars, lowercase letters, numbers, hyphens only.</p>
+          <p className="text-xs" style={{ color: 'var(--danger)' }}>1–32 chars, lowercase letters, numbers, hyphens. Must start and end with a letter or number.</p>
         )}
         {usernameValid && !isCheckingAvailability && debouncedUsername === username && isAvailable === false && (
           <p className="text-xs" style={{ color: 'var(--danger)' }}>That username is already taken.</p>
@@ -153,7 +152,6 @@ export default function RegisterView() {
         )}
       </div>
 
-      {/* How it works */}
       {canRegister && (
         <div className="rounded-2xl p-4 flex items-start gap-3" style={glass.inner}>
           <div className="rounded-lg p-2 shrink-0" style={{ background: 'rgba(18,45,69,0.08)' }}>
@@ -168,7 +166,6 @@ export default function RegisterView() {
         </div>
       )}
 
-      {/* Register button */}
       <button
         disabled={!canRegister || isBusy}
         onClick={() => void handleRegister()}

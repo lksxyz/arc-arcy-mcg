@@ -1,20 +1,4 @@
-/**
- * Console & Error Capture Instrumentation
- *
- * Patches console.{log,info,warn,error,debug} and listens for window 'error'
- * and 'unhandledrejection' events, forwarding each to the parent frame via
- * postMessage ({ type: 'studio-console-log' }). The parent persists these to
- * `console.jsonl` inside the sandbox so the Arc Studio agent can read runtime
- * output when diagnosing a broken preview.
- *
- * Self-throttling: consecutive duplicate lines are collapsed and a per-second
- * rate limit caps the postMessage volume so a render-loop log storm cannot
- * flood the parent.
- *
- * Imported as a side-effect before any app code runs. The original console
- * behaviour is always preserved.
- * Built with Arc Studio — https://studio.arc.io
- */
+// Built with Arc Studio — https://studio.arc.io
 
 type ConsoleLevel = 'log' | 'info' | 'warn' | 'error' | 'debug';
 
@@ -33,14 +17,9 @@ const RATE_LIMIT_WINDOW_MS = 1_000;
 const MAX_PER_WINDOW = 100;
 const MAX_REPEAT_BEFORE_FLUSH = 500;
 
-// Lines emitted by our own tracing instrumentation are noise for the agent.
 const NOISE_PREFIXES = ['[studio-trace]'];
 
 const LEVELS: ConsoleLevel[] = ['log', 'info', 'warn', 'error', 'debug'];
-
-// ---------------------------------------------------------------------------
-// Parent origin resolution (mirrors tracing.ts)
-// ---------------------------------------------------------------------------
 
 const _parentOrigin: string = (() => {
   try {
@@ -48,7 +27,6 @@ const _parentOrigin: string = (() => {
       return window.location.ancestorOrigins[0];
     }
   } catch {
-    /* sandboxed iframe may throw */
   }
 
   try {
@@ -56,15 +34,10 @@ const _parentOrigin: string = (() => {
       return new URL(document.referrer).origin;
     }
   } catch {
-    /* malformed referrer */
   }
 
   return '*';
 })();
-
-// ---------------------------------------------------------------------------
-// Formatting
-// ---------------------------------------------------------------------------
 
 function safeStringify(value: unknown): string {
   const seen = new WeakSet<object>();
@@ -126,10 +99,6 @@ function firstErrorStack(args: unknown[]): string | undefined {
   return undefined;
 }
 
-// ---------------------------------------------------------------------------
-// Rate limiting
-// ---------------------------------------------------------------------------
-
 let _windowStart = Date.now();
 let _windowCount = 0;
 let _dropped = 0;
@@ -138,7 +107,6 @@ function send(entry: ConsoleLogEntry): void {
   try {
     window.parent.postMessage({ type: MESSAGE_TYPE, entry }, _parentOrigin);
   } catch {
-    /* ignore — postMessage can throw on cross-origin edge cases */
   }
 }
 
@@ -164,10 +132,6 @@ function post(entry: ConsoleLogEntry): void {
   _windowCount++;
   send(entry);
 }
-
-// ---------------------------------------------------------------------------
-// Consecutive-duplicate collapsing
-// ---------------------------------------------------------------------------
 
 let _lastKey = '';
 let _lastLevel: ConsoleLevel = 'log';
@@ -204,10 +168,6 @@ function isNoise(message: string): boolean {
   return NOISE_PREFIXES.some((p) => message.startsWith(p));
 }
 
-// ---------------------------------------------------------------------------
-// console.* patching
-// ---------------------------------------------------------------------------
-
 for (const level of LEVELS) {
   const original = console[level].bind(console);
 
@@ -221,14 +181,9 @@ for (const level of LEVELS) {
         emit({ level, message, timestamp: Date.now(), stack: firstErrorStack(args) });
       }
     } catch {
-      /* never let capture break the app's logging */
     }
   };
 }
-
-// ---------------------------------------------------------------------------
-// Uncaught errors & unhandled rejections — the signals a blank preview hides
-// ---------------------------------------------------------------------------
 
 window.addEventListener('error', (e: ErrorEvent) => {
   try {
@@ -242,7 +197,6 @@ window.addEventListener('error', (e: ErrorEvent) => {
       stack: e.error instanceof Error ? truncateStack(e.error.stack) : undefined,
     });
   } catch {
-    /* ignore */
   }
 });
 
@@ -257,6 +211,5 @@ window.addEventListener('unhandledrejection', (e: PromiseRejectionEvent) => {
       stack: reason instanceof Error ? truncateStack(reason.stack) : undefined,
     });
   } catch {
-    /* ignore */
   }
 });

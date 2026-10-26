@@ -5,7 +5,8 @@ import {
 } from 'wagmi'
 import { ConnectKitButton } from 'connectkit'
 import { Loader2, Search, Send, ExternalLink, CheckCircle2, AlertCircle } from 'lucide-react'
-import { bytesToHex } from 'viem'
+import { bytesToHex, hexToBigInt, numberToHex, slice, type Hex } from 'viem'
+import { toast } from 'sonner'
 import { ARCY_REGISTRY, ARCY_PAY, ACTIVE_CHAIN_ID, USDC_ADDRESS, USDC_PERMIT_NAME, USDC_PERMIT_VERSION } from '@/contracts'
 import { generateStealthAddress } from '@/stealth'
 import { parseAmount } from '@/onchain-money'
@@ -22,6 +23,32 @@ interface PayViewProps {
   defaultUsername?: string
 }
 
+interface PaymentPreview {
+  stealthAddress: `0x${string}`
+  ephemeralPubKey: Hex
+  viewTag: Hex
+  amountLabel: string
+  rawAmount: bigint
+  username: string
+}
+
+const USERNAME_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/
+
+function splitPermitSignature(signature: Hex): { v: number; r: Hex; s: Hex } {
+  if (signature.length === 130) {
+    const r = slice(signature, 0, 32)
+    const yParityAndS = hexToBigInt(slice(signature, 32, 64))
+    const v = Number(yParityAndS >> 255n) + 27
+    const s = numberToHex(yParityAndS & ((1n << 255n) - 1n), { size: 32 })
+    return { v, r, s }
+  }
+
+  const r = slice(signature, 0, 32)
+  const s = slice(signature, 32, 64)
+  const rawV = Number(hexToBigInt(slice(signature, 64, 65)))
+  return { v: rawV < 27 ? rawV + 27 : rawV, r, s }
+}
+
 export default function PayView({ defaultUsername = '' }: PayViewProps) {
   const { address, chainId, isConnected } = useAccount()
   const { switchChain } = useSwitchChain()
@@ -31,21 +58,19 @@ export default function PayView({ defaultUsername = '' }: PayViewProps) {
   const [amount, setAmount] = useState('')
   const [status, setStatus] = useState<'idle' | 'signing' | 'sending'>('idle')
   const [lastPaid, setLastPaid] = useState<{ amount: string; username: string } | null>(null)
+  const [preview, setPreview] = useState<PaymentPreview | null>(null)
 
   const wrongChain = isConnected && chainId !== ACTIVE_CHAIN_ID
 
-  // Resolve recipient stealth meta-address
   const { data: recipientMetaAddr, isLoading: isLooking, error: lookupError } = useReadContract({
     ...ARCY_REGISTRY,
     functionName: 'getStealthMetaAddress',
     args: [recipientUsername],
-    query: { enabled: recipientUsername.length >= 1 && /^[a-z0-9-]{1,32}$/.test(recipientUsername) },
+    query: { enabled: USERNAME_PATTERN.test(recipientUsername) },
   })
 
-  // EIP-712 permit signing
   const { signTypedDataAsync } = useSignTypedData()
 
-  // Payment tx
   const { writeContractAsync, data: payHash, error: payError, reset: resetPay } = useWriteContract()
   const { isLoading: isPayConfirming, isSuccess: isPaySuccess } = useWaitForTransactionReceipt({ hash: payHash })
 
@@ -60,21 +85,36 @@ export default function PayView({ defaultUsername = '' }: PayViewProps) {
 
   const isBusy = status !== 'idle' || isPayConfirming
 
-  const handlePay = async () => {
-    if (!parsedAmount || !recipientMetaAddr || !address || !publicClient) return
+  const preparePayment = () => {
+    if (!parsedAmount || !recipientMetaAddr || !address) return
     if (wrongChain) { switchChain({ chainId: ACTIVE_CHAIN_ID }); return }
 
     try {
-      // 1. Derive one-time stealth address client-side
       const { stealthAddress, ephemeralPubKey, viewTag } = generateStealthAddress(
         recipientMetaAddr as `0x${string}`,
       )
 
-      // 2. Build permit: sign off-chain (no gas, no tx)
-      setStatus('signing')
-      const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600) // 1 hour
+      setPreview({
+        stealthAddress,
+        ephemeralPubKey: bytesToHex(ephemeralPubKey),
+        viewTag: bytesToHex(viewTag),
+        amountLabel: amount,
+        rawAmount: parsedAmount.raw,
+        username: recipientUsername,
+      })
+    } catch {
+      toast.error('This username has invalid stealth keys. Ask the recipient to update them.')
+    }
+  }
 
-      // Read current nonce from USDC contract
+  const handlePay = async () => {
+    if (!preview || !address || !publicClient) return
+    if (wrongChain) { switchChain({ chainId: ACTIVE_CHAIN_ID }); return }
+
+    try {
+      setStatus('signing')
+      const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600)
+
       const nonce = await publicClient.readContract({
         address: USDC_ADDRESS,
         abi: [{ name: 'nonces', type: 'function', stateMutability: 'view', inputs: [{ name: 'owner', type: 'address' }], outputs: [{ type: 'uint256' }] }],
@@ -102,35 +142,32 @@ export default function PayView({ defaultUsername = '' }: PayViewProps) {
         message: {
           owner:    address,
           spender:  ARCY_PAY.address,
-          value:    parsedAmount.raw,
+          value:    preview.rawAmount,
           nonce:    nonce,
           deadline,
         },
       })
 
-      // Split signature into v, r, s
-      const r = (`0x${permitSig.slice(2, 66)}`)
-      const s = (`0x${permitSig.slice(66, 130)}`)
-      const v = parseInt(permitSig.slice(130, 132), 16)
+      const { v, r, s } = splitPermitSignature(permitSig)
 
-      // 3. One transaction: permit + transfer + announce
       setStatus('sending')
-      setLastPaid({ amount, username: recipientUsername })
+      setLastPaid({ amount: preview.amountLabel, username: preview.username })
       await writeContractAsync({
         ...ARCY_PAY,
         functionName: 'payByUsernameWithPermit',
         args: [
-          recipientUsername,
-          stealthAddress,
-          parsedAmount.raw,
-          `0x${bytesToHex(ephemeralPubKey).slice(2)}`,
-          `0x${bytesToHex(viewTag).slice(2).padEnd(2, '0')}` as `0x01`,
+          preview.username,
+          preview.stealthAddress,
+          preview.rawAmount,
+          preview.ephemeralPubKey,
+          preview.viewTag,
           deadline,
           v,
           r,
           s,
         ],
       })
+      setPreview(null)
       setStatus('idle')
     } catch (err) {
       setStatus('idle')
@@ -199,7 +236,6 @@ export default function PayView({ defaultUsername = '' }: PayViewProps) {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Recipient */}
       <div className="flex flex-col gap-1.5">
         <label className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--muted)', letterSpacing: '0.08em' }}>
           Pay to
@@ -208,7 +244,10 @@ export default function PayView({ defaultUsername = '' }: PayViewProps) {
           <span className="text-sm font-medium" style={{ color: 'var(--subtle)' }}>@</span>
           <input
             value={recipientUsername}
-            onChange={e => setRecipientUsername(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+            onChange={e => {
+              setRecipientUsername(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))
+              setPreview(null)
+            }}
             placeholder="username"
             maxLength={32}
             className="flex-1 bg-transparent text-sm font-semibold outline-none placeholder:font-normal"
@@ -226,7 +265,6 @@ export default function PayView({ defaultUsername = '' }: PayViewProps) {
         )}
       </div>
 
-      {/* Amount */}
       <div className="flex flex-col gap-1.5">
         <label className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--muted)', letterSpacing: '0.08em' }}>
           Amount
@@ -237,7 +275,10 @@ export default function PayView({ defaultUsername = '' }: PayViewProps) {
             value={amount}
             onChange={e => {
               const v = e.target.value.replace(/[^0-9.]/g, '')
-              if (v === '' || /^\d*\.?\d*$/.test(v)) setAmount(v)
+              if (v === '' || /^\d*\.?\d*$/.test(v)) {
+                setAmount(v)
+                setPreview(null)
+              }
             }}
             placeholder="0.00"
             className="display w-full bg-transparent text-4xl font-bold tabular-nums outline-none placeholder:text-slate-300"
@@ -247,8 +288,42 @@ export default function PayView({ defaultUsername = '' }: PayViewProps) {
         </div>
       </div>
 
-      {/* Privacy note + permit hint */}
-      {readyToPay && (
+      {preview && (
+        <div className="rounded-2xl p-4 flex flex-col gap-3" style={{ background: 'rgba(18,45,69,0.04)', border: '1px solid rgba(18,45,69,0.12)' }}>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--muted)', letterSpacing: '0.08em' }}>Review payment</p>
+            <p className="text-sm mt-1" style={{ color: 'var(--ink)' }}>
+              {preview.amountLabel} USDC to <span className="font-semibold">@{preview.username}</span>
+            </p>
+          </div>
+          <div>
+            <p className="text-xs" style={{ color: 'var(--muted)' }}>One-time stealth address that receives the funds:</p>
+            <p className="text-xs font-mono mt-1 break-all" style={{ color: 'var(--ink)' }}>{preview.stealthAddress}</p>
+          </div>
+          <p className="text-xs" style={{ color: 'var(--danger)' }}>
+            This address is generated in your browser and is not verified by the contract. If it does not match what your wallet or this page showed before, cancel.
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPreview(null)}
+              className="flex-1 rounded-xl py-2 text-xs font-semibold"
+              style={{ background: 'rgba(18,45,69,0.08)', color: 'var(--ink)' }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => void handlePay()}
+              disabled={status !== 'idle'}
+              className="flex-1 rounded-xl py-2 text-xs font-semibold text-white disabled:opacity-40"
+              style={{ background: 'var(--accent)' }}
+            >
+              {status === 'signing' ? 'Sign permit...' : status === 'sending' ? 'Sending...' : 'Confirm & sign'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {readyToPay && !preview && (
         <div className="rounded-xl px-4 py-3 flex flex-col gap-1" style={{ background: 'rgba(18,45,69,0.04)', border: '1px solid rgba(18,45,69,0.08)' }}>
           <div className="flex items-center gap-2">
             <div className="size-1.5 rounded-full shrink-0" style={{ background: 'var(--success)' }} />
@@ -265,15 +340,16 @@ export default function PayView({ defaultUsername = '' }: PayViewProps) {
         </div>
       )}
 
-      {/* Single send button */}
-      <button
-        disabled={isBusy || !readyToPay}
-        onClick={() => void handlePay()}
-        className="w-full rounded-2xl py-3.5 text-sm font-semibold text-white transition-all hover:scale-[1.01] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40"
-        style={{ background: 'var(--accent)' }}
-      >
-        {buttonLabel()}
-      </button>
+      {!preview && (
+        <button
+          disabled={isBusy || !readyToPay}
+          onClick={preparePayment}
+          className="w-full rounded-2xl py-3.5 text-sm font-semibold text-white transition-all hover:scale-[1.01] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40"
+          style={{ background: 'var(--accent)' }}
+        >
+          {buttonLabel()}
+        </button>
+      )}
 
       {payError && (
         <p className="text-xs text-center" style={{ color: 'var(--danger)' }}>
@@ -281,6 +357,8 @@ export default function PayView({ defaultUsername = '' }: PayViewProps) {
             ? 'Username not found.'
             : payError.message.includes('TransferFailed') || payError.message.includes('insufficient')
             ? 'Insufficient USDC balance.'
+            : payError.message.includes('PermitFailed')
+            ? 'Permit was rejected or already used. Please retry and sign a new permit.'
             : payError.message.includes('deadline')
             ? 'Permit expired. Please try again.'
             : 'Payment failed. Please try again.'}

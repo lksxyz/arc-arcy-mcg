@@ -1,18 +1,4 @@
-/**
- * Transaction Tracing Instrumentation
- *
- * Patches globalThis.fetch to capture all viem http() transport RPC calls
- * and regular HTTP requests, and patches window.ethereum.request() to capture
- * EIP-1193 provider calls (e.g. eth_sendTransaction via injected wallets).
- * Events are sent to the parent frame via postMessage.
- *
- * Imported as a side-effect before any app code runs.
- * Built with Arc Studio — https://studio.arc.io
- */
-
-// ---------------------------------------------------------------------------
-// Types (inlined — sandbox can't use app module aliases)
-// ---------------------------------------------------------------------------
+// Built with Arc Studio — https://studio.arc.io
 
 interface TraceGroupRef { id: string; label: string; }
 
@@ -61,10 +47,6 @@ interface GroupEndTraceEvent {
 
 type TraceEvent = RpcTraceEvent | HttpTraceEvent | GroupStartTraceEvent | GroupEndTraceEvent;
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 const LOG = '[studio-trace]';
 
 function log(...args: unknown[]): void {
@@ -80,10 +62,6 @@ const _prefix = typeof crypto !== 'undefined' && crypto.randomUUID
 function id(): string {
   return `${_prefix}-${++_counter}`;
 }
-
-// ---------------------------------------------------------------------------
-// Group stack — stack-based nesting for trace groups
-// ---------------------------------------------------------------------------
 
 interface GroupStackEntry { id: string; label: string; }
 const _groupStack: GroupStackEntry[] = [];
@@ -134,32 +112,23 @@ function setupTraceAPI(): void {
 
 setupTraceAPI();
 
-// ---------------------------------------------------------------------------
-// emitWithGroups — attaches current group ancestry to RPC/HTTP events
-// ---------------------------------------------------------------------------
-
 function emitWithGroups(event: RpcTraceEvent | HttpTraceEvent): void {
   const groups = currentGroups();
   emit(groups.length > 0 ? { ...event, groups } : event);
 }
 
-/**
- * Resolve the parent frame's origin for targeted postMessage.
- * Falls back to '*' only if the origin cannot be determined.
- */
 const _parentOrigin: string = (() => {
   try {
-    // ancestorOrigins is available in Chromium and Safari
     if (window.location.ancestorOrigins?.length) {
       return window.location.ancestorOrigins[0];
     }
-  } catch { /* sandboxed iframe may throw */ }
+  } catch {}
 
   try {
     if (document.referrer) {
       return new URL(document.referrer).origin;
     }
-  } catch { /* malformed referrer */ }
+  } catch {}
 
   return '*';
 })();
@@ -168,7 +137,6 @@ function emit(event: TraceEvent): void {
   try {
     window.parent.postMessage({ type: 'studio-trace-event', event }, _parentOrigin);
   } catch {
-    /* ignore */
   }
 }
 
@@ -209,10 +177,6 @@ function parseChainId(raw: unknown): number {
   return 0;
 }
 
-// ---------------------------------------------------------------------------
-// Opt-in/opt-out — parent frame controls whether tracing is active
-// ---------------------------------------------------------------------------
-
 let _enabled = false;
 
 window.addEventListener('message', (e: MessageEvent<MessageData>) => {
@@ -232,10 +196,6 @@ function isNoise(url: string): boolean {
   return NOISE.some((p) => url.includes(p));
 }
 
-// ---------------------------------------------------------------------------
-// ChainId: learn from responses, keyed by RPC URL hostname
-// ---------------------------------------------------------------------------
-
 const _chainByHost = new Map<string, number>();
 
 function host(url: string): string {
@@ -246,12 +206,6 @@ function host(url: string): string {
   }
 }
 
-/**
- * Resolve a fetch target to an absolute URL against the running app's origin.
- * Same-origin fetches pass a relative path (e.g. '/api/estimate'); capturing it
- * absolute here means the trace panel shows the real sandbox host instead of a
- * placeholder, and host()/chainForUrl() can key off it reliably.
- */
 function toAbsoluteUrl(raw: string): string {
   try {
     return new URL(raw, window.location.href).href;
@@ -273,14 +227,9 @@ function learnChain(url: string, chainId: number): void {
   }
 }
 
-/** Pre-register a chain's RPC URL so events show the correct chain from the start. */
 export function registerChain(chainId: number, rpcUrl: string): void {
   learnChain(rpcUrl, chainId);
 }
-
-// ---------------------------------------------------------------------------
-// JSON-RPC helpers (single + batch)
-// ---------------------------------------------------------------------------
 
 interface JRPCReq { method: string; params?: unknown[]; id?: unknown }
 interface JRPCRes { id?: unknown; result?: unknown; error?: { message?: string } }
@@ -300,7 +249,6 @@ interface EIP6963AnnounceProviderEvent extends Event {
   detail?: { provider?: EIP1193Provider };
 }
 
-/** Type-safe accessor for window.ethereum (may be set by wallet extensions). */
 function getEthereum(): EIP1193Provider | undefined {
   const w = window as unknown as { ethereum?: EIP1193Provider };
   return w.ethereum;
@@ -339,10 +287,6 @@ function findResp(resps: JRPCRes[], reqId: unknown): JRPCRes | undefined {
   return resps.find((r) => r.id !== undefined && r.id === reqId);
 }
 
-// ---------------------------------------------------------------------------
-// Patch globalThis.fetch — captures viem http() transport + regular HTTP
-// ---------------------------------------------------------------------------
-
 try {
   const _fetch = globalThis.fetch;
   log('patching fetch');
@@ -357,9 +301,6 @@ try {
       const rawUrl = input instanceof Request ? input.url : String(input);
       url = toAbsoluteUrl(rawUrl);
       method = init?.method ?? (input instanceof Request ? input.method : 'GET');
-      // Noise-match the raw target, not the absolutized URL: the dev preview host
-      // (<id>.preview.localhost:5173) contains the "localhost:5173" NOISE substring,
-      // so matching the absolute URL would drop every same-origin request in dev.
       if (!_enabled || isNoise(rawUrl)) return _fetch.call(globalThis, input, init);
       if (init?.body) reqBody = tryJson(truncate(typeof init.body === 'string' ? init.body : stringify(init.body)));
     } catch {
@@ -379,13 +320,13 @@ try {
         } else {
           emitWithGroups({ kind: 'http', id: id(), timestamp: ts, method, url, status: 0, duration: dur, requestBody: reqBody });
         }
-      } catch { /* swallow */ }
+      } catch {}
       throw err;
     }
 
     const dur = Date.now() - ts;
     let resBody: unknown;
-    try { resBody = tryJson(truncate(await res.clone().text())); } catch { /* ignore */ }
+    try { resBody = tryJson(truncate(await res.clone().text())); } catch {}
 
     try {
       if (method === 'POST' && hasRpc(reqBody)) {
@@ -395,9 +336,7 @@ try {
           const resp = findResp(resps, r.id) ?? resps[0];
           const result = resp?.result;
           const error = resp?.error?.message;
-          // Learn chainId from eth_chainId responses
           if (r.method === 'eth_chainId' && result) learnChain(url, parseChainId(result));
-          // Also learn from responses that embed chainId (e.g. eth_getTransactionByHash)
           if (result && typeof result === 'object' && 'chainId' in (result as Record<string, unknown>)) {
             const embedded = parseChainId((result as Record<string, unknown>).chainId);
             if (embedded > 0) learnChain(url, embedded);
@@ -407,16 +346,11 @@ try {
       } else {
         emitWithGroups({ kind: 'http', id: id(), timestamp: ts, method, url, status: res.status, duration: dur, requestBody: reqBody, responseBody: resBody });
       }
-    } catch { /* swallow */ }
+    } catch {}
 
     return res;
   };
 } catch (e) { log('fetch patch FAILED', e); }
-
-// ---------------------------------------------------------------------------
-// Patch window.ethereum.request() — captures EIP-1193 provider calls
-// (e.g. eth_sendTransaction, eth_estimateGas via injected wallets)
-// ---------------------------------------------------------------------------
 
 let _providerChainId = 0;
 
@@ -449,7 +383,6 @@ function patchProvider(provider: EIP1193Provider | undefined): void {
 
     const dur = Date.now() - ts;
 
-    // Learn chainId from eth_chainId responses
     if (method === 'eth_chainId' && result) {
       _providerChainId = parseChainId(result);
       log('provider chain learned:', _providerChainId);
@@ -464,23 +397,20 @@ function patchProvider(provider: EIP1193Provider | undefined): void {
     return result;
   };
 
-  // Track chain changes
   try {
     provider.on?.('chainChanged', (chainId: unknown) => {
       _providerChainId = parseChainId(chainId);
       log('provider chain changed:', _providerChainId);
     });
-  } catch { /* not all providers support .on() */ }
+  } catch {}
 }
 
 try {
-  // Case 1: provider already exists
   const existingProvider = getEthereum();
   if (existingProvider) {
     patchProvider(existingProvider);
   }
 
-  // Case 2: provider set later (wallet extensions inject asynchronously)
   let _eth: EIP1193Provider | undefined = existingProvider;
   Object.defineProperty(window, 'ethereum', {
     configurable: true,
@@ -492,7 +422,6 @@ try {
     },
   });
 
-  // Case 3: EIP-6963 multi-provider discovery
   window.addEventListener('eip6963:announceProvider', ((e: EIP6963AnnounceProviderEvent) => {
     patchProvider(e?.detail?.provider);
   }));

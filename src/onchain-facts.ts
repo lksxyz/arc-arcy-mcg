@@ -1,18 +1,3 @@
-/*
- * Onchain facts for this app. GENERATED — do not edit.
- *
- * Arc Studio writes this file from its onchain facts registry, so the values here are
- * the ones Arc Studio itself deploys and links against. Edits are overwritten.
- *
- * Import a fact instead of typing one:
- *
- *   import { getUsdc, requireChain, buildTxExplorerUrl } from '@/onchain-facts';
- *
- * A chain's gas token and its ERC-20 USDC are separate facts. On Arc both are
- * USDC, at different decimal counts: 'nativeCurrency' for the gas token,
- * 'usdc' for the ERC-20. Mixing the two is a 10^12 error on a money path.
- */
-
 export const USDC_DECIMALS = 6;
 
 export interface TokenFact {
@@ -24,7 +9,6 @@ export interface TokenFact {
 export interface NativeCurrencyFact {
   symbol: string;
   decimals: number;
-  /** True when the gas token IS USDC, which makes 'decimals' above the gas decimals. */
   isUsdc: boolean;
 }
 
@@ -32,15 +16,12 @@ export interface OnchainChain {
   chainId: number;
   name: string;
   isTestnet: boolean;
-  /** Rollup / alt-EVM family. Absent for an L1 and for a chain in no shared-stack family. */
   family?: string;
   explorerBase: string;
   rpcUrls: string[];
   nativeCurrency: NativeCurrencyFact;
-  /** Absent when no USDC contract is deployed on the chain. */
   usdc?: TokenFact;
   cctpDomain?: number;
-  /** Circle SCP blockchain enum. Absent unless the deploy tool supports the chain. */
   scpBlockchain?: string;
 }
 
@@ -558,7 +539,6 @@ export const ONCHAIN_CHAINS: readonly OnchainChain[] = FACTS.chains;
 
 export const TESTNET_ONCHAIN_CHAINS: readonly OnchainChain[] = FACTS.chains.filter((chain) => chain.isTestnet);
 
-/** CCTP and Gateway addresses differ by network kind (see networkKind) — mainnet differs from testnet. */
 export const EVM_PROTOCOL_CONTRACTS: readonly ProtocolContractFact[] = FACTS.protocolContracts;
 
 const BY_CHAIN_ID = new Map(ONCHAIN_CHAINS.map((chain) => [chain.chainId, chain]));

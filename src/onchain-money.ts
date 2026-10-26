@@ -1,34 +1,3 @@
-/*
- * Money math for USDC amounts. GENERATED — do not edit.
- *
- * Arc Studio writes this file from its own source, so the rules here are the ones
- * Arc Studio itself is tested against. Edits are overwritten.
- *
- * Import the math instead of writing it:
- *
- *   import { Amount, parseAmount, parseUsdc, usdcToGasToken } from '@/onchain-money';
- *
- * This module owns every decimal count and every amount operation. Do not hand
- * a decimal count to a parser, and do not add two amounts without it.
- *
- * On Arc the gas token IS USDC at 18 decimals while the ERC-20 interface uses
- * 6. The two views are one pool of funds, and mixing them is a 10^12 error on a
- * money path. 'usdcToGasToken' and 'gasTokenToUsdc' are the only safe bridge.
- */
-
-/*
- * Money math for USDC amounts: single owner of "how many decimals?" and "may
- * these two amounts be added?".
- *
- * This source ships verbatim into every sandbox as `@/onchain-money`, with only
- * the import specifier below rewritten. Add no other repo import.
- *
- * Values are integer `bigint` smallest units carried with their decimal count.
- * No `number` holds a value: a float loses microdollars on a large balance.
- * `add`, `sub` and the comparisons refuse two different decimal counts, so
- * `toDecimals` is the only way to change one.
- */
-
 import { getUsdc, requireChain, USDC_DECIMALS } from '@/onchain-facts';
 
 export type AmountErrorCode =
@@ -75,7 +44,6 @@ function absBigInt(value: bigint): bigint {
   return value < 0n ? -value : value;
 }
 
-/** Drops trailing zeros without a regex — a fixed-width scan avoids any backtracking risk. */
 function trimTrailingZeros(digits: string): string {
   let end = digits.length;
 
@@ -86,7 +54,6 @@ function trimTrailingZeros(digits: string): string {
   return digits.slice(0, end);
 }
 
-/** Rejects a value with more fraction digits than the token has, rather than dropping the tail. */
 export function parseUnitsExact(value: string, decimals: number): bigint {
   assertValidDecimals(decimals);
 
@@ -181,7 +148,6 @@ export class Amount {
     return new Amount(0n, decimals);
   }
 
-  /** `decimals` is read only for an empty list, where there is no count to infer. */
   static sum(amounts: readonly Amount[], decimals?: number): Amount {
     if (amounts.length === 0) {
       if (decimals === undefined) {
@@ -218,7 +184,6 @@ export class Amount {
     return new Amount(this.raw / divisor, this.decimals);
   }
 
-  /** Splits without losing the dust that `div` truncates away. */
   divmod(divisor: bigint): { quotient: Amount; remainder: Amount } {
     return { quotient: this.div(divisor), remainder: new Amount(this.raw % divisor, this.decimals) };
   }
@@ -231,7 +196,6 @@ export class Amount {
     return new Amount(absBigInt(this.raw), this.decimals);
   }
 
-  /** Widening is exact; narrowing throws unless the dropped digits are zero or `mode` is `trunc`. */
   toDecimals(decimals: number, mode: RescaleMode = 'exact'): Amount {
     assertValidDecimals(decimals);
 
@@ -336,7 +300,6 @@ export function gasTokenDecimalsFor(chainId: number): number {
   return requireChain(chainId).nativeCurrency.decimals;
 }
 
-/** Parses into the ERC-20 USDC view of `chainId`, taking the decimal count from the facts module. */
 export function parseAmount(chainId: number, value: string): Amount {
   return Amount.parse(value, usdcDecimalsFor(chainId));
 }
@@ -357,11 +320,6 @@ export function formatGasAmount(chainId: number, amount: Amount): string {
   return amount.toString();
 }
 
-/**
- * True only where the gas token IS USDC, so the two views hold one pool of funds
- * and a rescale between them is meaningful. False where the gas token is a
- * different asset, and converting would need a price rather than an exponent.
- */
 export function isGasTokenUsdc(chainId: number): boolean {
   return requireChain(chainId).nativeCurrency.isUsdc;
 }
@@ -373,10 +331,6 @@ export function usdcToGasToken(chainId: number, amount: Amount): Amount {
   return amount.toDecimals(gasTokenDecimalsFor(chainId));
 }
 
-/**
- * Gas is metered far below a microdollar, so narrowing to the ERC-20 view almost
- * always has a remainder; it truncates by default. Pass `exact` to refuse.
- */
 export function gasTokenToUsdc(chainId: number, amount: Amount, mode: RescaleMode = 'trunc'): Amount {
   requireGasTokenIsUsdc(chainId);
   requireDecimals(amount, gasTokenDecimalsFor(chainId), 'gas token');

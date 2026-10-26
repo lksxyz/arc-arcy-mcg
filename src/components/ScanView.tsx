@@ -4,10 +4,13 @@ import { ConnectKitButton } from 'connectkit'
 import { Loader2, ScanSearch, Wallet, ExternalLink, CheckCircle2, KeyRound } from 'lucide-react'
 import { erc20Abi, formatUnits } from 'viem'
 import { toast } from 'sonner'
-import { ARCY_ANNOUNCER, ACTIVE_CHAIN_ID, USDC_ADDRESS } from '@/contracts'
+import { ARCY_ANNOUNCER, ARCY_REGISTRY, ACTIVE_CHAIN_ID, USDC_ADDRESS } from '@/contracts'
 import {
   deriveStealthKeysFromSignature,
-  STEALTH_KEY_DERIVATION_MESSAGE,
+  stealthKeyDerivationMessage,
+  stealthMetaVersion,
+  hasValidCompressedPrefix,
+  CURRENT_META_VERSION,
   checkStealthAddress,
   computeStealthKey,
   padPrivKey,
@@ -33,7 +36,7 @@ interface ClaimablePayment {
 }
 
 export default function ScanView() {
-  const { isConnected } = useAccount()
+  const { address, isConnected } = useAccount()
   const publicClient = usePublicClient({ chainId: ACTIVE_CHAIN_ID })
   const { signMessageAsync, isPending: isSigning } = useSignMessage()
 
@@ -42,25 +45,53 @@ export default function ScanView() {
   const [scanned, setScanned] = useState(false)
   const [totalChecked, setTotalChecked] = useState(0)
   const [claimStep, setClaimStep] = useState<Record<string, 'idle' | 'copied'>>({})
+  const [fullHistory, setFullHistory] = useState(false)
+  const [progress, setProgress] = useState(0)
 
   const scan = useCallback(async () => {
     if (!publicClient) return
     setIsScanning(true)
     setPayments([])
     setScanned(false)
+    setProgress(0)
 
     try {
-      // 1. Sign to derive stealth keys
-      const sig = await signMessageAsync({ message: STEALTH_KEY_DERIVATION_MESSAGE })
-      const { spendingPrivKey, viewingPrivKey, spendingPubKey } = deriveStealthKeysFromSignature(sig)
+      let version = CURRENT_META_VERSION
+      if (address) {
+        try {
+          const username = await publicClient.readContract({
+            ...ARCY_REGISTRY,
+            functionName: 'getUsername',
+            args: [address],
+          })
+          if (typeof username === 'string' && username.length > 0) {
+            const meta = await publicClient.readContract({
+              ...ARCY_REGISTRY,
+              functionName: 'getStealthMetaAddress',
+              args: [username],
+            })
+            version = stealthMetaVersion(meta as `0x${string}`)
+          }
+        } catch {
+          version = CURRENT_META_VERSION
+        }
+      }
+
+      const sig = await signMessageAsync({
+        message: stealthKeyDerivationMessage(version, ACTIVE_CHAIN_ID),
+      })
+      const { spendingPrivKey, viewingPrivKey, spendingPubKey } = deriveStealthKeysFromSignature(sig, {
+        version,
+        chainId: ACTIVE_CHAIN_ID,
+      })
 
       const { privKey: viewPrivKey } = getKeyPair(viewingPrivKey)
       const { privKey: spendPrivKey } = getKeyPair(spendingPrivKey)
 
-      // 2. Scan Announcement events in 2,000-block chunks
       const CHUNK = 2000n
+      const SCAN_WINDOW = 10000n
       const currentBlock = await publicClient.getBlockNumber()
-      const fromBlock = currentBlock > 10000n ? currentBlock - 10000n : 0n
+      const fromBlock = fullHistory || currentBlock <= SCAN_WINDOW ? 0n : currentBlock - SCAN_WINDOW
 
       const announcementEvent = {
         type: 'event' as const,
@@ -74,7 +105,6 @@ export default function ScanView() {
         ],
       } as const
 
-      // Fetch with retry + backoff for rate-limit errors
       interface AnnouncementLog {
         args: { stealthAddress: `0x${string}`; ephemeralPubKey: `0x${string}`; viewTag: `0x${string}` }
         transactionHash: `0x${string}` | null
@@ -92,7 +122,8 @@ export default function ScanView() {
           })) as AnnouncementLog[]
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e)
-          if (msg.includes('rate limit') && attempt < 4) {
+          const rateLimited = /rate.?limit|429|too many requests|request limit/i.test(msg)
+          if (rateLimited && attempt < 4) {
             await new Promise(r => setTimeout(r, 400 * (attempt + 1)))
             return fetchChunk(start, end, attempt + 1)
           }
@@ -101,13 +132,14 @@ export default function ScanView() {
       }
 
       const logs: AnnouncementLog[] = []
+      const totalBlocks = currentBlock > fromBlock ? currentBlock - fromBlock + 1n : 1n
       for (let start = fromBlock; start <= currentBlock; start += CHUNK) {
         const end = start + CHUNK - 1n < currentBlock ? start + CHUNK - 1n : currentBlock
         const chunk = await fetchChunk(start, end)
         logs.push(...chunk)
+        setProgress(Math.min(100, Number(((end - fromBlock + 1n) * 100n) / totalBlocks)))
       }
 
-      // 3. Check each log against derived keys
       const mine: ClaimablePayment[] = []
 
       for (const log of logs) {
@@ -115,14 +147,20 @@ export default function ScanView() {
         const ephemeralPubKey = log.args.ephemeralPubKey
         const viewTag = log.args.viewTag
         if (!stealthAddress || !ephemeralPubKey || !viewTag) continue
+        if (!hasValidCompressedPrefix(ephemeralPubKey)) continue
 
-        const isMine = checkStealthAddress({
-          stealthAddress,
-          ephemeralPubKeyHex: ephemeralPubKey,
-          viewTagByte: viewTag,
-          viewingPrivKey: viewPrivKey,
-          spendingPubKey,
-        })
+        let isMine = false
+        try {
+          isMine = checkStealthAddress({
+            stealthAddress,
+            ephemeralPubKeyHex: ephemeralPubKey,
+            viewTagByte: viewTag,
+            viewingPrivKey: viewPrivKey,
+            spendingPubKey,
+          })
+        } catch {
+          continue
+        }
 
         if (isMine) {
           const stealthPrivKey = computeStealthKey({
@@ -139,7 +177,7 @@ export default function ScanView() {
               functionName: 'balanceOf',
               args: [stealthAddress],
             })
-          } catch { /* ignore */ }
+          } catch {}
 
           mine.push({
             stealthAddress,
@@ -167,7 +205,7 @@ export default function ScanView() {
     } finally {
       setIsScanning(false)
     }
-  }, [publicClient, signMessageAsync])
+  }, [publicClient, signMessageAsync, address, fullHistory])
 
   const copyPrivKey = (payment: ClaimablePayment) => {
     const privKeyHex = padPrivKey(payment.stealthPrivKey)
@@ -192,7 +230,6 @@ export default function ScanView() {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Intro card */}
       {!scanned && (
         <div className="rounded-2xl p-4 flex items-start gap-3" style={glass.inner}>
           <div className="rounded-lg p-2 shrink-0" style={{ background: 'rgba(18,45,69,0.08)' }}>
@@ -201,13 +238,26 @@ export default function ScanView() {
           <div>
             <div className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>Sign to scan</div>
             <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
-              Your wallet signs a message to re-derive your stealth keys. The signature stays in your browser — nothing is sent onchain.
+              Your wallet signs a message to re-derive your stealth keys. The signature stays in your browser and is never sent onchain, but it is as powerful as your spending key. Only sign this message on arcy.me.
             </p>
           </div>
         </div>
       )}
 
-      {/* Scan button */}
+      {!isScanning && (
+        <label className="flex items-start gap-2 rounded-xl px-3 py-2.5 text-xs" style={{ background: 'rgba(18,45,69,0.04)', border: '1px solid rgba(18,45,69,0.08)', color: 'var(--muted)' }}>
+          <input
+            type="checkbox"
+            checked={fullHistory}
+            onChange={e => setFullHistory(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span>
+            Scan full history. Slower: reads every announcement from block 0 instead of the latest 10,000 blocks.
+          </span>
+        </label>
+      )}
+
       <button
         disabled={isScanning || isSigning}
         onClick={() => void scan()}
@@ -221,17 +271,22 @@ export default function ScanView() {
           : <><ScanSearch className="size-4" />{scanned ? 'Scan again' : 'Scan for payments'}</>}
       </button>
 
-      {/* Results */}
+      {isScanning && progress > 0 && (
+        <p className="text-xs text-center" style={{ color: 'var(--subtle)' }}>
+          Scanned {progress}% of the requested block range.
+        </p>
+      )}
+
       {scanned && !isScanning && (
         payments.length === 0 ? (
           <div className="rounded-2xl p-4 flex flex-col gap-2" style={glass.inner}>
             <p className="text-sm font-medium" style={{ color: 'var(--muted)' }}>No payments found.</p>
             <p className="text-xs" style={{ color: 'var(--subtle)' }}>
-              Checked {totalChecked} announcement{totalChecked !== 1 ? 's' : ''} in the last 10,000 blocks.
+              Checked {totalChecked} announcement{totalChecked !== 1 ? 's' : ''} in {fullHistory ? 'the full chain history' : 'the last 10,000 blocks'}.
             </p>
             {totalChecked > 0 && (
               <p className="text-xs mt-1 rounded-xl px-3 py-2" style={{ background: 'rgba(186,43,76,0.06)', color: 'var(--danger)', border: '1px solid rgba(186,43,76,0.12)' }}>
-                Announcements were found but none matched your keys. If you registered before today, go to Account, release your username, and re-register — your stealth keys will be updated to match your wallet.
+                Announcements were found but none matched your keys. If you rotated your stealth keys, older payments belong to your previous keys and will not appear here.
               </p>
             )}
           </div>

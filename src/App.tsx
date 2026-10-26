@@ -10,8 +10,6 @@ import AccountView from '@/components/AccountView'
 import { useReadContract } from 'wagmi'
 import { ARCY_REGISTRY, ACTIVE_CHAIN_ID, IS_MAINNET_BUILD } from '@/contracts'
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
 type Route =
   | { page: 'pay'; username: string }
   | { page: 'app' }
@@ -35,8 +33,6 @@ function go(path: string) {
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
 
-// ─── Design tokens ───────────────────────────────────────────────────────────
-
 const spectral = 'linear-gradient(90deg, #5fbeff, #af8ff4, #f05c6b, #ffcd83, #7ef1b3)'
 
 const glass = {
@@ -49,8 +45,6 @@ const glass = {
   } as React.CSSProperties,
 }
 
-// ─── Background blobs ─────────────────────────────────────────────────────────
-
 function Blobs() {
   return (
     <div className="fixed inset-0 pointer-events-none overflow-hidden" aria-hidden>
@@ -60,8 +54,6 @@ function Blobs() {
     </div>
   )
 }
-
-// ─── Landing page ─────────────────────────────────────────────────────────────
 
 function Landing() {
   return (
@@ -123,11 +115,12 @@ function Landing() {
       <p className="text-center text-xs mt-8" style={{ color:'var(--subtle)' }}>
         ERC-5564 stealth addresses · {IS_MAINNET_BUILD ? 'Arc Mainnet' : 'Arc Testnet'}
       </p>
+      <p className="text-center text-xs mt-2" style={{ color:'var(--subtle)' }}>
+        Experimental, unaudited software. Use small amounts.
+      </p>
     </div>
   )
 }
-
-// ─── Public pay page  (/username) ─────────────────────────────────────────────
 
 function PublicPayPage({ username }: { username: string }) {
   return (
@@ -162,8 +155,6 @@ function PublicPayPage({ username }: { username: string }) {
   )
 }
 
-// ─── App shell (wallet-guarded) ───────────────────────────────────────────────
-
 type AppTab = 'claim' | 'account'
 
 function AppShell() {
@@ -180,13 +171,11 @@ function AppShell() {
     chainId: ACTIVE_CHAIN_ID,
   })
 
-  // Sync URL when tab changes
   useEffect(() => {
     const target = activeTab === 'claim' ? '/app/claim' : '/app/account'
     if (window.location.pathname !== target) go(target)
   }, [activeTab])
 
-  // ── Not connected ───────────────────────────────────────────────────────────
   if (!isConnected && !isConnecting) {
     return (
       <div className="relative z-10 mx-auto max-w-md px-4 pb-12 pt-8">
@@ -212,7 +201,6 @@ function AppShell() {
     )
   }
 
-  // ── Loading username ─────────────────────────────────────────────────────────
   if (usernameLoading) {
     return (
       <div className="relative z-10 mx-auto max-w-md px-4 pb-12 pt-8 flex items-center justify-center min-h-dvh">
@@ -223,7 +211,6 @@ function AppShell() {
 
   const hasUsername = typeof username === 'string' && username.length > 0
 
-  // ── No username → setup ──────────────────────────────────────────────────────
   if (!hasUsername) {
     return (
       <div className="relative z-10 mx-auto max-w-md px-4 pb-12 pt-8">
@@ -247,7 +234,6 @@ function AppShell() {
     )
   }
 
-  // ── Has username → app dashboard ──────────────────────────────────────────────
   const tabs: { id: AppTab; label: string; icon: React.ReactNode }[] = [
     { id: 'claim',   label: 'Claim',   icon: <ScanSearch className="size-4" /> },
     { id: 'account', label: 'Account', icon: <User className="size-4" /> },
@@ -268,7 +254,6 @@ function AppShell() {
         <ConnectKitButton />
       </header>
 
-      {/* Tab bar */}
       <div className="flex rounded-2xl p-1 mb-4 gap-1"
         style={{ background:'rgba(255,255,255,0.50)', backdropFilter:'blur(16px)', WebkitBackdropFilter:'blur(16px)', border:'1px solid rgba(255,255,255,0.60)' }}
       >
@@ -282,7 +267,6 @@ function AppShell() {
         ))}
       </div>
 
-      {/* Content */}
       <div className="rounded-3xl p-5" style={glass.card}>
         {activeTab === 'claim'   && <ScanView />}
         {activeTab === 'account' && <AccountView />}
@@ -290,8 +274,6 @@ function AppShell() {
     </div>
   )
 }
-
-// ─── Root ─────────────────────────────────────────────────────────────────────
 
 export default function App() {
   const [route, setRoute] = useState<Route>(() => parsePath(window.location.pathname))
